@@ -15,7 +15,7 @@ jobs:
       - name: Checkout Project
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -27,7 +27,7 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Flutter Version
+      - name: Check Flutter Version
         run: flutter --version
 
       - name: Generate Android Project
@@ -38,9 +38,11 @@ jobs:
 
       - name: Install Android SDK 36
         run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+          "platforms;android-36" \
+          "build-tools;36.0.0"
 
-      - name: Force Compile SDK 36
+      - name: Force App Compile SDK 36
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -73,21 +75,124 @@ jobs:
 
               p.write_text(text)
               print(f"Updated {p}")
+
           PY
 
-      - name: Get Packages
+      - name: Get Flutter Packages
         run: flutter pub get
 
-      - name: Analyze Application
+      - name: Fix File Picker Android SDK
+        run: |
+          echo "Searching for file_picker Android Gradle file..."
+
+          FILE_PICKER_GRADLE=$(find "$HOME/.pub-cache" \
+            -path "*/file_picker-*/android/build.gradle" \
+            | head -1)
+
+          FILE_PICKER_KTS=$(find "$HOME/.pub-cache" \
+            -path "*/file_picker-*/android/build.gradle.kts" \
+            | head -1)
+
+          if [ -n "$FILE_PICKER_GRADLE" ]; then
+            echo "Found: $FILE_PICKER_GRADLE"
+
+            sed -i \
+              's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 36/g' \
+              "$FILE_PICKER_GRADLE"
+
+            sed -i \
+              's/compileSdk flutter.compileSdkVersion/compileSdk 36/g' \
+              "$FILE_PICKER_GRADLE"
+
+            sed -i \
+              -E 's/compileSdkVersion [0-9]+/compileSdkVersion 36/g' \
+              "$FILE_PICKER_GRADLE"
+
+            sed -i \
+              -E 's/compileSdk [0-9]+/compileSdk 36/g' \
+              "$FILE_PICKER_GRADLE"
+
+            echo "Updated file_picker build.gradle:"
+            cat "$FILE_PICKER_GRADLE"
+
+          elif [ -n "$FILE_PICKER_KTS" ]; then
+            echo "Found: $FILE_PICKER_KTS"
+
+            sed -i \
+              's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/g' \
+              "$FILE_PICKER_KTS"
+
+            sed -i \
+              -E 's/compileSdk = [0-9]+/compileSdk = 36/g' \
+              "$FILE_PICKER_KTS"
+
+            echo "Updated file_picker build.gradle.kts:"
+            cat "$FILE_PICKER_KTS"
+
+          else
+            echo "ERROR: file_picker Android Gradle file not found."
+            exit 1
+          fi
+
+      - name: Flutter Analyze
         run: flutter analyze lib --no-fatal-infos
+
+      - name: Clean Before Build
+        run: flutter clean
+
+      - name: Restore Packages
+        run: flutter pub get
+
+      - name: Fix File Picker Again After Clean
+        run: |
+          FILE_PICKER_GRADLE=$(find "$HOME/.pub-cache" \
+            -path "*/file_picker-*/android/build.gradle" \
+            | head -1)
+
+          FILE_PICKER_KTS=$(find "$HOME/.pub-cache" \
+            -path "*/file_picker-*/android/build.gradle.kts" \
+            | head -1)
+
+          if [ -n "$FILE_PICKER_GRADLE" ]; then
+
+            sed -i \
+              's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 36/g' \
+              "$FILE_PICKER_GRADLE"
+
+            sed -i \
+              's/compileSdk flutter.compileSdkVersion/compileSdk 36/g' \
+              "$FILE_PICKER_GRADLE"
+
+            sed -i \
+              -E 's/compileSdkVersion [0-9]+/compileSdkVersion 36/g' \
+              "$FILE_PICKER_GRADLE"
+
+            sed -i \
+              -E 's/compileSdk [0-9]+/compileSdk 36/g' \
+              "$FILE_PICKER_GRADLE"
+
+          elif [ -n "$FILE_PICKER_KTS" ]; then
+
+            sed -i \
+              's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/g' \
+              "$FILE_PICKER_KTS"
+
+            sed -i \
+              -E 's/compileSdk = [0-9]+/compileSdk = 36/g' \
+              "$FILE_PICKER_KTS"
+
+          fi
 
       - name: Build Release APK
         run: flutter build apk --release
 
-      - name: Check APK
+      - name: Verify APK
         run: |
+          echo "Checking APK..."
           ls -lh build/app/outputs/flutter-apk/
-          test -f build/app/outputs/flutter-apk/app-release.apk
+
+          test -f \
+          build/app/outputs/flutter-apk/app-release.apk
 
       - name: Upload Experts APK
         uses: actions/upload-artifact@v4
